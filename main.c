@@ -74,7 +74,10 @@ void initialize_network() {
   output_deltas = (double *)aligned_malloc(OUTPUT_SIZE * sizeof(double));
   output_biases = (double *)aligned_malloc(OUTPUT_SIZE * sizeof(double));
   target = (double *)aligned_malloc(OUTPUT_SIZE * sizeof(double));
-  real_target = (double *)aligned_malloc(OUTPUT_SIZE_ORIGINAL * sizeof(double));
+  // Allocate space for the unpadded target values plus padding to match
+  // OUTPUT_SIZE. This ensures the buffer can always store at least
+  // OUTPUT_SIZE_ORIGINAL elements.
+  real_target = (double *)aligned_malloc(OUTPUT_SIZE * sizeof(double));
 
   memset(input, 0, INPUT_SIZE * sizeof(double));
   memset(target, 0, OUTPUT_SIZE * sizeof(double));
@@ -286,6 +289,8 @@ void cleanup() {
   free(output_layer);
   free(output_deltas);
   free(target);
+  // real_target was allocated using OUTPUT_SIZE to include padding
+  // so free it here accordingly
   free(real_target);
 }
 
