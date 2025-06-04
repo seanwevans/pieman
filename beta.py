@@ -128,6 +128,8 @@ if __name__ == "__main__":
         epoch += 1
 
         print(f"{epoch}: {prev_loss-epoch_loss:.10f} in {time.time()-prev_time:.3f}s")
+        prev_loss = epoch_loss
+        prev_time = time.time()
 
     # Plot the loss history
     plt.figure(figsize=(10, 6))
