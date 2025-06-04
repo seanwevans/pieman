@@ -105,6 +105,14 @@ Remove compiled binaries:
 make clean
 ```
 
+## Testing
+
+Run the minimal test suite with:
+
+```sh
+make test
+```
+
 ## License
 
 This project is licensed under the MIT license.
