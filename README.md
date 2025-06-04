@@ -35,6 +35,17 @@ Run the executable:
 
 The training will start and display epoch-wise loss values. The trained model is saved as `model.bin`.
 
+## Command-line Options
+
+You can override default parameters at runtime:
+
+| Option | Description | Default |
+| ------ | ----------- | ------- |
+| `-l`   | Number of hidden layers | `28` |
+| `-s`   | Neurons per hidden layer | `28` |
+| `-r`   | Learning rate | `1e-2` |
+| `-e`   | Maximum epochs | `1e9` |
+
 ## Model Architecture
 
 - **Input Layer**: 784 neurons (default)
@@ -84,15 +95,15 @@ load_model("model.bin");
 
 ## Customization
 
-Modify these macros in `main.c` to adjust the model:
+Modify these macros in `main.c` to adjust the default model:
 
 ```c
 #define INPUT_SIZE_ORIGINAL 784
-#define HIDDEN_LAYERS 28
-#define HIDDEN_SIZE_ORIGINAL 28
+#define DEFAULT_HIDDEN_LAYERS 28
+#define DEFAULT_HIDDEN_SIZE_ORIGINAL 28
 #define OUTPUT_SIZE_ORIGINAL 10
-#define LEARNING_RATE 1e-2
-#define MAX_EPOCHS 1e9
+#define DEFAULT_LEARNING_RATE 1e-2
+#define DEFAULT_MAX_EPOCHS 1e9
 #define MAX_ACCEPTABLE_LOSS 1e-5
 #define REPORT_FREQUENCY 10000
 ```

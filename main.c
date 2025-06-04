@@ -4,21 +4,22 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #define RANDOM_SEED 1
 
 #define INPUT_SIZE_ORIGINAL 784
-#define HIDDEN_LAYERS 28
-#define HIDDEN_SIZE_ORIGINAL 28
+#define DEFAULT_HIDDEN_LAYERS 28
+#define DEFAULT_HIDDEN_SIZE_ORIGINAL 28
 #define OUTPUT_SIZE_ORIGINAL 10
 
 #define INPUT_SIZE ((INPUT_SIZE_ORIGINAL + 3) & ~3)   // Pad to multiple of 4
-#define HIDDEN_SIZE ((HIDDEN_SIZE_ORIGINAL + 3) & ~3) // Pad to multiple of 4
+#define HIDDEN_SIZE_PAD(x) (((x) + 3) & ~3) // Pad to multiple of 4
 #define OUTPUT_SIZE ((OUTPUT_SIZE_ORIGINAL + 3) & ~3) // Pad to multiple of 4
 
-#define LEARNING_RATE 1e-2
+#define DEFAULT_LEARNING_RATE 1e-2
 #define SAMPLE_SIZE 1
-#define MAX_EPOCHS 1e9
+#define DEFAULT_MAX_EPOCHS 1e9
 #define MAX_ACCEPTABLE_LOSS 1e-5
 
 #define REPORT_FREQUENCY 10000
@@ -38,6 +39,12 @@ double *output_layer;
 double *output_deltas;
 double *target;
 double *real_target;
+
+int hidden_layers_count = DEFAULT_HIDDEN_LAYERS;
+int hidden_size_original = DEFAULT_HIDDEN_SIZE_ORIGINAL;
+int hidden_size;
+double learning_rate = DEFAULT_LEARNING_RATE;
+long max_epochs = DEFAULT_MAX_EPOCHS;
 
 void *aligned_malloc(size_t size) {
   void *ptr = aligned_alloc(32, size);
@@ -61,9 +68,36 @@ double horizontal_sum(__m256d v) {
   return _mm_cvtsd_f64(result);
 }
 
+void parse_args(int argc, char **argv) {
+  int opt;
+  while ((opt = getopt(argc, argv, "l:s:r:e:h")) != -1) {
+    switch (opt) {
+    case 'l':
+      hidden_layers_count = atoi(optarg);
+      break;
+    case 's':
+      hidden_size_original = atoi(optarg);
+      break;
+    case 'r':
+      learning_rate = atof(optarg);
+      break;
+    case 'e':
+      max_epochs = atol(optarg);
+      break;
+    default:
+      fprintf(stderr,
+              "Usage: %s [-l layers] [-s hidden_size] [-r learning_rate] [-e max_epochs]\n",
+              argv[0]);
+      exit(EXIT_FAILURE);
+    }
+  }
+
+  hidden_size = HIDDEN_SIZE_PAD(hidden_size_original);
+}
+
 void initialize_network() {
-  printf("👨‍🎓 %d params\n", HIDDEN_LAYERS * HIDDEN_SIZE_ORIGINAL);
-  hidden_layers = (Layer *)malloc(HIDDEN_LAYERS * sizeof(Layer));
+  printf("👨‍🎓 %d params\n", hidden_layers_count * hidden_size_original);
+  hidden_layers = (Layer *)malloc(hidden_layers_count * sizeof(Layer));
   if (!hidden_layers) {
     fprintf(stderr, "Memory allocation failed for hidden layers!\n");
     exit(EXIT_FAILURE);
@@ -82,20 +116,20 @@ void initialize_network() {
   memset(input, 0, INPUT_SIZE * sizeof(double));
   memset(target, 0, OUTPUT_SIZE * sizeof(double));
 
-  for (int i = 0; i < HIDDEN_LAYERS; i++) {
-    size_t input_dim = (i == 0) ? INPUT_SIZE : HIDDEN_SIZE;
-    size_t weight_size = HIDDEN_SIZE * input_dim;
+  for (int i = 0; i < hidden_layers_count; i++) {
+    size_t input_dim = (i == 0) ? INPUT_SIZE : hidden_size;
+    size_t weight_size = hidden_size * input_dim;
 
     hidden_layers[i].weights =
         (double *)aligned_malloc(weight_size * sizeof(double));
     hidden_layers[i].outputs =
-        (double *)aligned_malloc(HIDDEN_SIZE * sizeof(double));
+        (double *)aligned_malloc(hidden_size * sizeof(double));
     hidden_layers[i].biases =
-        (double *)aligned_malloc(HIDDEN_SIZE * sizeof(double));
+        (double *)aligned_malloc(hidden_size * sizeof(double));
     hidden_layers[i].deltas =
-        (double *)aligned_malloc(HIDDEN_SIZE * sizeof(double));
+        (double *)aligned_malloc(hidden_size * sizeof(double));
 
-    for (int j = 0; j < HIDDEN_SIZE; j++) {
+    for (int j = 0; j < hidden_size; j++) {
       hidden_layers[i].biases[j] = (rand() / (double)RAND_MAX) - 0.5;
 
       for (unsigned k = 0; k < input_dim; k++) {
@@ -104,25 +138,25 @@ void initialize_network() {
       }
     }
 
-    memset(hidden_layers[i].outputs, 0, HIDDEN_SIZE * sizeof(double));
-    memset(hidden_layers[i].deltas, 0, HIDDEN_SIZE * sizeof(double));
+    memset(hidden_layers[i].outputs, 0, hidden_size * sizeof(double));
+    memset(hidden_layers[i].deltas, 0, hidden_size * sizeof(double));
   }
 
   output_weights =
-      (double *)aligned_malloc(OUTPUT_SIZE * HIDDEN_SIZE * sizeof(double));
+      (double *)aligned_malloc(OUTPUT_SIZE * hidden_size * sizeof(double));
 
   for (int i = 0; i < OUTPUT_SIZE; i++) {
     output_biases[i] = (rand() / (double)RAND_MAX) - 0.5;
 
-    for (int j = 0; j < HIDDEN_SIZE; j++) {
-      output_weights[i * HIDDEN_SIZE + j] = (rand() / (double)RAND_MAX) - 0.5;
+    for (int j = 0; j < hidden_size; j++) {
+      output_weights[i * hidden_size + j] = (rand() / (double)RAND_MAX) - 0.5;
     }
   }
 }
 
 void forward() {
   // First hidden layer
-  for (int j = 0; j < HIDDEN_SIZE; j++) {
+  for (int j = 0; j < hidden_size; j++) {
     __m256d sum_vec = _mm256_set1_pd(hidden_layers[0].biases[j]);
 
     for (int k = 0; k < INPUT_SIZE; k += 4) {
@@ -136,14 +170,14 @@ void forward() {
   }
 
   // Remaining hidden layers
-  for (int i = 1; i < HIDDEN_LAYERS; i++) {
-    for (int j = 0; j < HIDDEN_SIZE; j++) {
+  for (int i = 1; i < hidden_layers_count; i++) {
+    for (int j = 0; j < hidden_size; j++) {
       __m256d sum_vec = _mm256_set1_pd(hidden_layers[i].biases[j]);
 
-      for (int k = 0; k < HIDDEN_SIZE; k += 4) {
+      for (int k = 0; k < hidden_size; k += 4) {
         __m256d input_vec = _mm256_load_pd(&hidden_layers[i - 1].outputs[k]);
         __m256d weight_vec =
-            _mm256_load_pd(&hidden_layers[i].weights[j * HIDDEN_SIZE + k]);
+            _mm256_load_pd(&hidden_layers[i].weights[j * hidden_size + k]);
         sum_vec = _mm256_fmadd_pd(input_vec, weight_vec, sum_vec);
       }
 
@@ -155,10 +189,10 @@ void forward() {
   for (int i = 0; i < OUTPUT_SIZE; i++) {
     __m256d sum_vec = _mm256_set1_pd(output_biases[i]);
 
-    for (int j = 0; j < HIDDEN_SIZE; j += 4) {
+    for (int j = 0; j < hidden_size; j += 4) {
       __m256d input_vec =
-          _mm256_load_pd(&hidden_layers[HIDDEN_LAYERS - 1].outputs[j]);
-      __m256d weight_vec = _mm256_load_pd(&output_weights[i * HIDDEN_SIZE + j]);
+          _mm256_load_pd(&hidden_layers[hidden_layers_count - 1].outputs[j]);
+      __m256d weight_vec = _mm256_load_pd(&output_weights[i * hidden_size + j]);
       sum_vec = _mm256_fmadd_pd(input_vec, weight_vec, sum_vec);
     }
 
@@ -194,28 +228,28 @@ double loss() {
 }
 
 void backward() {
-  for (int i = HIDDEN_LAYERS - 1; i >= 0; i--) {
-    for (int j = 0; j < HIDDEN_SIZE; j++) {
+  for (int i = hidden_layers_count - 1; i >= 0; i--) {
+    for (int j = 0; j < hidden_size; j++) {
       __m256d error_vec = _mm256_setzero_pd();
 
-      if (i == HIDDEN_LAYERS - 1) {
+      if (i == hidden_layers_count - 1) {
         for (int k = 0; k < OUTPUT_SIZE; k += 4) {
           __m256d delta_vec = _mm256_load_pd(&output_deltas[k]);
           __m256d weight_vec =
-              _mm256_set_pd(output_weights[(k + 3) * HIDDEN_SIZE + j],
-                            output_weights[(k + 2) * HIDDEN_SIZE + j],
-                            output_weights[(k + 1) * HIDDEN_SIZE + j],
-                            output_weights[k * HIDDEN_SIZE + j]);
+              _mm256_set_pd(output_weights[(k + 3) * hidden_size + j],
+                            output_weights[(k + 2) * hidden_size + j],
+                            output_weights[(k + 1) * hidden_size + j],
+                            output_weights[k * hidden_size + j]);
           error_vec = _mm256_fmadd_pd(delta_vec, weight_vec, error_vec);
         }
       } else {
-        for (int k = 0; k < HIDDEN_SIZE; k += 4) {
+        for (int k = 0; k < hidden_size; k += 4) {
           __m256d delta_vec = _mm256_load_pd(&hidden_layers[i + 1].deltas[k]);
           __m256d weight_vec = _mm256_set_pd(
-              hidden_layers[i + 1].weights[(k + 3) * HIDDEN_SIZE + j],
-              hidden_layers[i + 1].weights[(k + 2) * HIDDEN_SIZE + j],
-              hidden_layers[i + 1].weights[(k + 1) * HIDDEN_SIZE + j],
-              hidden_layers[i + 1].weights[k * HIDDEN_SIZE + j]);
+              hidden_layers[i + 1].weights[(k + 3) * hidden_size + j],
+              hidden_layers[i + 1].weights[(k + 2) * hidden_size + j],
+              hidden_layers[i + 1].weights[(k + 1) * hidden_size + j],
+              hidden_layers[i + 1].weights[k * hidden_size + j]);
           error_vec = _mm256_fmadd_pd(delta_vec, weight_vec, error_vec);
         }
       }
@@ -227,29 +261,29 @@ void backward() {
 
   for (int i = 0; i < OUTPUT_SIZE; i++) {
     __m256d delta_vec = _mm256_set1_pd(output_deltas[i]);
-    __m256d lr_vec = _mm256_set1_pd(LEARNING_RATE);
+    __m256d lr_vec = _mm256_set1_pd(learning_rate);
 
-    for (int j = 0; j < HIDDEN_SIZE; j += 4) {
+    for (int j = 0; j < hidden_size; j += 4) {
       __m256d hidden_output_vec =
-          _mm256_load_pd(&hidden_layers[HIDDEN_LAYERS - 1].outputs[j]);
+          _mm256_load_pd(&hidden_layers[hidden_layers_count - 1].outputs[j]);
       __m256d weight_update =
           _mm256_mul_pd(_mm256_mul_pd(lr_vec, delta_vec), hidden_output_vec);
 
       __m256d current_weights =
-          _mm256_load_pd(&output_weights[i * HIDDEN_SIZE + j]);
+          _mm256_load_pd(&output_weights[i * hidden_size + j]);
       __m256d new_weights = _mm256_add_pd(current_weights, weight_update);
-      _mm256_store_pd(&output_weights[i * HIDDEN_SIZE + j], new_weights);
+      _mm256_store_pd(&output_weights[i * hidden_size + j], new_weights);
     }
 
-    output_biases[i] += LEARNING_RATE * output_deltas[i];
+    output_biases[i] += learning_rate * output_deltas[i];
   }
 
-  for (int i = HIDDEN_LAYERS - 1; i >= 0; i--) {
-    size_t prev_size = (i > 0) ? HIDDEN_SIZE : INPUT_SIZE;
+  for (int i = hidden_layers_count - 1; i >= 0; i--) {
+    size_t prev_size = (i > 0) ? hidden_size : INPUT_SIZE;
 
-    for (int j = 0; j < HIDDEN_SIZE; j++) {
+    for (int j = 0; j < hidden_size; j++) {
       __m256d delta_vec = _mm256_set1_pd(hidden_layers[i].deltas[j]);
-      __m256d lr_vec = _mm256_set1_pd(LEARNING_RATE);
+      __m256d lr_vec = _mm256_set1_pd(learning_rate);
 
       for (unsigned k = 0; k < prev_size; k += 4) {
         __m256d prev_output_vec;
@@ -263,19 +297,19 @@ void backward() {
             _mm256_mul_pd(_mm256_mul_pd(lr_vec, delta_vec), prev_output_vec);
 
         __m256d current_weights =
-            _mm256_load_pd(&hidden_layers[i].weights[j * prev_size + k]);
+        _mm256_load_pd(&hidden_layers[i].weights[j * prev_size + k]);
         __m256d new_weights = _mm256_add_pd(current_weights, weight_update);
         _mm256_store_pd(&hidden_layers[i].weights[j * prev_size + k],
                         new_weights);
       }
 
-      hidden_layers[i].biases[j] += LEARNING_RATE * hidden_layers[i].deltas[j];
+      hidden_layers[i].biases[j] += learning_rate * hidden_layers[i].deltas[j];
     }
   }
 }
 
 void cleanup() {
-  for (int i = 0; i < HIDDEN_LAYERS; i++) {
+  for (int i = 0; i < hidden_layers_count; i++) {
     free(hidden_layers[i].weights);
     free(hidden_layers[i].outputs);
     free(hidden_layers[i].biases);
@@ -301,9 +335,9 @@ int save_model(const char *filename) {
     return 0;
   }
 
-  for (int i = 0; i < HIDDEN_LAYERS; i++) {
-    size_t input_dim = (i == 0) ? INPUT_SIZE : HIDDEN_SIZE;
-    size_t weight_size = HIDDEN_SIZE * input_dim;
+  for (int i = 0; i < hidden_layers_count; i++) {
+    size_t input_dim = (i == 0) ? INPUT_SIZE : hidden_size;
+    size_t weight_size = hidden_size * input_dim;
 
     if (fwrite(hidden_layers[i].weights, sizeof(double), weight_size, file) !=
         weight_size) {
@@ -312,16 +346,16 @@ int save_model(const char *filename) {
       return 0;
     }
 
-    if (fwrite(hidden_layers[i].biases, sizeof(double), HIDDEN_SIZE, file) !=
-        HIDDEN_SIZE) {
+    if (fwrite(hidden_layers[i].biases, sizeof(double), hidden_size, file) !=
+        hidden_size) {
       fprintf(stderr, "Error writing hidden layer %d biases\n", i);
       fclose(file);
       return 0;
     }
   }
 
-  if (fwrite(output_weights, sizeof(double), OUTPUT_SIZE * HIDDEN_SIZE, file) !=
-      OUTPUT_SIZE * HIDDEN_SIZE) {
+  if (fwrite(output_weights, sizeof(double), OUTPUT_SIZE * hidden_size, file) !=
+      OUTPUT_SIZE * hidden_size) {
     fprintf(stderr, "Error writing output weights\n");
     fclose(file);
     return 0;
@@ -345,9 +379,9 @@ int load_model(const char *filename) {
     return 0;
   }
 
-  for (int i = 0; i < HIDDEN_LAYERS; i++) {
-    size_t input_dim = (i == 0) ? INPUT_SIZE : HIDDEN_SIZE;
-    size_t weight_size = HIDDEN_SIZE * input_dim;
+  for (int i = 0; i < hidden_layers_count; i++) {
+    size_t input_dim = (i == 0) ? INPUT_SIZE : hidden_size;
+    size_t weight_size = hidden_size * input_dim;
 
     if (fread(hidden_layers[i].weights, sizeof(double), weight_size, file) !=
         weight_size) {
@@ -355,16 +389,16 @@ int load_model(const char *filename) {
       fclose(file);
       return 0;
     }
-    if (fread(hidden_layers[i].biases, sizeof(double), HIDDEN_SIZE, file) !=
-        HIDDEN_SIZE) {
+    if (fread(hidden_layers[i].biases, sizeof(double), hidden_size, file) !=
+        hidden_size) {
       fprintf(stderr, "Error reading hidden layer %d biases\n", i);
       fclose(file);
       return 0;
     }
   }
 
-  if (fread(output_weights, sizeof(double), OUTPUT_SIZE * HIDDEN_SIZE, file) !=
-      OUTPUT_SIZE * HIDDEN_SIZE) {
+  if (fread(output_weights, sizeof(double), OUTPUT_SIZE * hidden_size, file) !=
+      OUTPUT_SIZE * hidden_size) {
     fprintf(stderr, "Error reading output weights\n");
     fclose(file);
     return 0;
@@ -407,7 +441,7 @@ void train() {
   puts("┣━━━━━━━━━━━━━━━━━━━━━━┫");
 
   clock_t start = clock();
-  while (_loss > MAX_ACCEPTABLE_LOSS && epoch < MAX_EPOCHS) {
+  while (_loss > MAX_ACCEPTABLE_LOSS && epoch < max_epochs) {
     epoch += 1;
     forward();
     _loss = loss();
@@ -462,8 +496,10 @@ void train() {
     💾 model.bin
 */
 
-int main() {
+int main(int argc, char **argv) {
   srand(RANDOM_SEED);
+
+  parse_args(argc, argv);
 
   initialize_network();
   load_data();
