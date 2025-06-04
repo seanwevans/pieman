@@ -15,3 +15,7 @@ $(TARGET): $(OBJS)
 
 clean:
 	rm -f $(TARGET) $(OBJS)
+
+
+test:
+	bash tests/test.sh
