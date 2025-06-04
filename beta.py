@@ -80,16 +80,10 @@ if __name__ == "__main__":
     # Compute ground truth alpha and beta
     alpha_true, beta_true = get_ground_truth((x_tensor, y_tensor, z_tensor), t_tensor)
 
-    # Convert back to numpy for CDF computation
-    cdf_true = beta.cdf(x, alpha_true.numpy(), beta_true.numpy())  # precompute cdf
-
     # Convert to PyTorch tensors - first conversion from numpy still needs torch.tensor()
     inputs_tensor = torch.tensor(inputs, dtype=torch.float32).to(device)
     alpha_true_tensor = alpha_true.clone().detach().unsqueeze(1).to(device)
     beta_true_tensor = beta_true.clone().detach().unsqueeze(1).to(device)
-    cdf_true_tensor = (
-        torch.tensor(cdf_true, dtype=torch.float32).unsqueeze(1).to(device)
-    )
 
     # Initialize the model, loss function, and optimizer
     model = BetaNet(input_dim=input_dim).to(device)
