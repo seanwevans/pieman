@@ -68,18 +68,29 @@ The training will start and display epoch-wise loss values. The trained model is
 
 ### Save Model
 
-The model is saved automatically after training:
+The model is saved automatically after training. Check the return value to
+ensure the operation succeeded:
 
 ```c
-save_model("model.bin");
+int rc = save_model("model.bin");
+if (rc < 0) {
+    fprintf(stderr, "Failed to save model (error %d)\n", rc);
+}
+// On success you'll see:
+// 💾 model.bin
+// On failure an error message is printed and rc will be negative.
 ```
 
 ### Load Model
 
-To load a saved model:
+To load a saved model and verify it loads correctly:
 
 ```c
-load_model("model.bin");
+rc = load_model("model.bin");
+if (rc < 0) {
+    fprintf(stderr, "Failed to load model (error %d)\n", rc);
+}
+// If loading succeeds no message is printed by the function.
 ```
 
 ## Customization
