@@ -120,8 +120,8 @@ void initialize_network() {
   }
 }
 
-void forward() {
-  // First hidden layer
+// Forward propagation helpers
+static void forward_first_layer(void) {
   for (int j = 0; j < HIDDEN_SIZE; j++) {
     __m256d sum_vec = _mm256_set1_pd(hidden_layers[0].biases[j]);
 
@@ -134,8 +134,9 @@ void forward() {
 
     hidden_layers[0].outputs[j] = sigmoid(horizontal_sum(sum_vec));
   }
+}
 
-  // Remaining hidden layers
+static void forward_hidden_layers(void) {
   for (int i = 1; i < HIDDEN_LAYERS; i++) {
     for (int j = 0; j < HIDDEN_SIZE; j++) {
       __m256d sum_vec = _mm256_set1_pd(hidden_layers[i].biases[j]);
@@ -150,8 +151,9 @@ void forward() {
       hidden_layers[i].outputs[j] = sigmoid(horizontal_sum(sum_vec));
     }
   }
+}
 
-  // Output layer
+static void forward_output_layer(void) {
   for (int i = 0; i < OUTPUT_SIZE; i++) {
     __m256d sum_vec = _mm256_set1_pd(output_biases[i]);
 
@@ -164,6 +166,13 @@ void forward() {
 
     output_layer[i] = sigmoid(horizontal_sum(sum_vec));
   }
+}
+
+// Run a full forward pass through all layers
+void forward() {
+  forward_first_layer();
+  forward_hidden_layers();
+  forward_output_layer();
 }
 
 double loss() {
@@ -193,7 +202,8 @@ double loss() {
   return total_loss / OUTPUT_SIZE_ORIGINAL;
 }
 
-void backward() {
+// Backpropagation helpers
+static void compute_hidden_deltas(void) {
   for (int i = HIDDEN_LAYERS - 1; i >= 0; i--) {
     for (int j = 0; j < HIDDEN_SIZE; j++) {
       __m256d error_vec = _mm256_setzero_pd();
@@ -201,11 +211,11 @@ void backward() {
       if (i == HIDDEN_LAYERS - 1) {
         for (int k = 0; k < OUTPUT_SIZE; k += 4) {
           __m256d delta_vec = _mm256_load_pd(&output_deltas[k]);
-          __m256d weight_vec =
-              _mm256_set_pd(output_weights[(k + 3) * HIDDEN_SIZE + j],
-                            output_weights[(k + 2) * HIDDEN_SIZE + j],
-                            output_weights[(k + 1) * HIDDEN_SIZE + j],
-                            output_weights[k * HIDDEN_SIZE + j]);
+          __m256d weight_vec = _mm256_set_pd(
+              output_weights[(k + 3) * HIDDEN_SIZE + j],
+              output_weights[(k + 2) * HIDDEN_SIZE + j],
+              output_weights[(k + 1) * HIDDEN_SIZE + j],
+              output_weights[k * HIDDEN_SIZE + j]);
           error_vec = _mm256_fmadd_pd(delta_vec, weight_vec, error_vec);
         }
       } else {
@@ -224,7 +234,9 @@ void backward() {
           error * sigmoid_derivative(hidden_layers[i].outputs[j]);
     }
   }
+}
 
+static void update_output_layer_weights(void) {
   for (int i = 0; i < OUTPUT_SIZE; i++) {
     __m256d delta_vec = _mm256_set1_pd(output_deltas[i]);
     __m256d lr_vec = _mm256_set1_pd(LEARNING_RATE);
@@ -243,7 +255,9 @@ void backward() {
 
     output_biases[i] += LEARNING_RATE * output_deltas[i];
   }
+}
 
+static void update_hidden_layer_weights(void) {
   for (int i = HIDDEN_LAYERS - 1; i >= 0; i--) {
     size_t prev_size = (i > 0) ? HIDDEN_SIZE : INPUT_SIZE;
 
@@ -272,6 +286,13 @@ void backward() {
       hidden_layers[i].biases[j] += LEARNING_RATE * hidden_layers[i].deltas[j];
     }
   }
+}
+
+// Run backpropagation through all layers
+void backward() {
+  compute_hidden_deltas();
+  update_output_layer_weights();
+  update_hidden_layer_weights();
 }
 
 void cleanup() {
@@ -399,6 +420,14 @@ void load_data() {
   }
 }
 
+// Execute a single training iteration and return the loss
+static double train_epoch(void) {
+  forward();
+  double l = loss();
+  backward();
+  return l;
+}
+
 void train() {
   int epoch = 0;
   double _loss = 100.0;
@@ -409,9 +438,7 @@ void train() {
   clock_t start = clock();
   while (_loss > MAX_ACCEPTABLE_LOSS && epoch < MAX_EPOCHS) {
     epoch += 1;
-    forward();
-    _loss = loss();
-    backward();
+    _loss = train_epoch();
 
     if (epoch % REPORT_FREQUENCY == 0 || epoch == 1) {
       printf("┃ %7d  %.9f ┃\n", epoch, _loss);
