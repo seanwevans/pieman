@@ -60,6 +60,7 @@ if __name__ == "__main__":
     x_range = [0, 1]  # Normalized range for inputs
 
     batch_size = 2 ** 8
+    max_epochs = 1000
     loss_history = []
     epoch_loss = 1
     epoch = 0
@@ -101,7 +102,7 @@ if __name__ == "__main__":
     prev_loss = 1
     prev_time = time.time()
 
-    while epoch_loss > 1e-9:
+    while epoch_loss > 1e-9 and epoch < max_epochs:
         model.train()
         epoch_loss = 0
         for batch_inputs, batch_alpha, batch_beta in dataloader:
