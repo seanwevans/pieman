@@ -30,14 +30,16 @@ typedef struct {
   double *deltas;
 } Layer;
 
-Layer *hidden_layers;
-double *input;
-double *output_weights;
-double *output_biases;
-double *output_layer;
-double *output_deltas;
-double *target;
-double *real_target;
+typedef struct {
+  Layer *hidden_layers;
+  double *input;
+  double *output_weights;
+  double *output_biases;
+  double *output_layer;
+  double *output_deltas;
+  double *target;
+  double *real_target;
+} Network;
 
 void *aligned_malloc(size_t size) {
   void *ptr = aligned_alloc(32, size);
@@ -61,117 +63,118 @@ double horizontal_sum(__m256d v) {
   return _mm_cvtsd_f64(result);
 }
 
-void initialize_network() {
+void initialize_network(Network *net) {
   printf("👨‍🎓 %d params\n", HIDDEN_LAYERS * HIDDEN_SIZE_ORIGINAL);
-  hidden_layers = (Layer *)malloc(HIDDEN_LAYERS * sizeof(Layer));
-  if (!hidden_layers) {
+  net->hidden_layers = (Layer *)malloc(HIDDEN_LAYERS * sizeof(Layer));
+  if (!net->hidden_layers) {
     fprintf(stderr, "Memory allocation failed for hidden layers!\n");
     exit(EXIT_FAILURE);
   }
 
-  input = (double *)aligned_malloc(INPUT_SIZE * sizeof(double));
-  output_layer = (double *)aligned_malloc(OUTPUT_SIZE * sizeof(double));
-  output_deltas = (double *)aligned_malloc(OUTPUT_SIZE * sizeof(double));
-  output_biases = (double *)aligned_malloc(OUTPUT_SIZE * sizeof(double));
-  target = (double *)aligned_malloc(OUTPUT_SIZE * sizeof(double));
+  net->input = (double *)aligned_malloc(INPUT_SIZE * sizeof(double));
+  net->output_layer = (double *)aligned_malloc(OUTPUT_SIZE * sizeof(double));
+  net->output_deltas = (double *)aligned_malloc(OUTPUT_SIZE * sizeof(double));
+  net->output_biases = (double *)aligned_malloc(OUTPUT_SIZE * sizeof(double));
+  net->target = (double *)aligned_malloc(OUTPUT_SIZE * sizeof(double));
   // Allocate space for the unpadded target values plus padding to match
   // OUTPUT_SIZE. This ensures the buffer can always store at least
   // OUTPUT_SIZE_ORIGINAL elements.
-  real_target = (double *)aligned_malloc(OUTPUT_SIZE * sizeof(double));
+  net->real_target = (double *)aligned_malloc(OUTPUT_SIZE * sizeof(double));
 
-  memset(input, 0, INPUT_SIZE * sizeof(double));
-  memset(target, 0, OUTPUT_SIZE * sizeof(double));
+  memset(net->input, 0, INPUT_SIZE * sizeof(double));
+  memset(net->target, 0, OUTPUT_SIZE * sizeof(double));
 
   for (int i = 0; i < HIDDEN_LAYERS; i++) {
     size_t input_dim = (i == 0) ? INPUT_SIZE : HIDDEN_SIZE;
     size_t weight_size = HIDDEN_SIZE * input_dim;
 
-    hidden_layers[i].weights =
+    net->hidden_layers[i].weights =
         (double *)aligned_malloc(weight_size * sizeof(double));
-    hidden_layers[i].outputs =
+    net->hidden_layers[i].outputs =
         (double *)aligned_malloc(HIDDEN_SIZE * sizeof(double));
-    hidden_layers[i].biases =
+    net->hidden_layers[i].biases =
         (double *)aligned_malloc(HIDDEN_SIZE * sizeof(double));
-    hidden_layers[i].deltas =
+    net->hidden_layers[i].deltas =
         (double *)aligned_malloc(HIDDEN_SIZE * sizeof(double));
 
     for (int j = 0; j < HIDDEN_SIZE; j++) {
-      hidden_layers[i].biases[j] = (rand() / (double)RAND_MAX) - 0.5;
+      net->hidden_layers[i].biases[j] = (rand() / (double)RAND_MAX) - 0.5;
 
       for (unsigned k = 0; k < input_dim; k++) {
-        hidden_layers[i].weights[j * input_dim + k] =
+        net->hidden_layers[i].weights[j * input_dim + k] =
             (rand() / (double)RAND_MAX) - 0.5;
       }
     }
 
-    memset(hidden_layers[i].outputs, 0, HIDDEN_SIZE * sizeof(double));
-    memset(hidden_layers[i].deltas, 0, HIDDEN_SIZE * sizeof(double));
+    memset(net->hidden_layers[i].outputs, 0, HIDDEN_SIZE * sizeof(double));
+    memset(net->hidden_layers[i].deltas, 0, HIDDEN_SIZE * sizeof(double));
   }
 
-  output_weights =
+  net->output_weights =
       (double *)aligned_malloc(OUTPUT_SIZE * HIDDEN_SIZE * sizeof(double));
 
   for (int i = 0; i < OUTPUT_SIZE; i++) {
-    output_biases[i] = (rand() / (double)RAND_MAX) - 0.5;
+    net->output_biases[i] = (rand() / (double)RAND_MAX) - 0.5;
 
     for (int j = 0; j < HIDDEN_SIZE; j++) {
-      output_weights[i * HIDDEN_SIZE + j] = (rand() / (double)RAND_MAX) - 0.5;
+      net->output_weights[i * HIDDEN_SIZE + j] = (rand() / (double)RAND_MAX) - 0.5;
     }
   }
 }
 
-void forward() {
+void forward(Network *net) {
   // First hidden layer
   for (int j = 0; j < HIDDEN_SIZE; j++) {
-    __m256d sum_vec = _mm256_set1_pd(hidden_layers[0].biases[j]);
+    __m256d sum_vec = _mm256_set1_pd(net->hidden_layers[0].biases[j]);
 
     for (int k = 0; k < INPUT_SIZE; k += 4) {
-      __m256d input_vec = _mm256_load_pd(&input[k]);
+      __m256d input_vec = _mm256_load_pd(&net->input[k]);
       __m256d weight_vec =
-          _mm256_load_pd(&hidden_layers[0].weights[j * INPUT_SIZE + k]);
+          _mm256_load_pd(&net->hidden_layers[0].weights[j * INPUT_SIZE + k]);
       sum_vec = _mm256_fmadd_pd(input_vec, weight_vec, sum_vec);
     }
 
-    hidden_layers[0].outputs[j] = sigmoid(horizontal_sum(sum_vec));
+    net->hidden_layers[0].outputs[j] = sigmoid(horizontal_sum(sum_vec));
   }
 
   // Remaining hidden layers
   for (int i = 1; i < HIDDEN_LAYERS; i++) {
     for (int j = 0; j < HIDDEN_SIZE; j++) {
-      __m256d sum_vec = _mm256_set1_pd(hidden_layers[i].biases[j]);
+      __m256d sum_vec = _mm256_set1_pd(net->hidden_layers[i].biases[j]);
 
       for (int k = 0; k < HIDDEN_SIZE; k += 4) {
-        __m256d input_vec = _mm256_load_pd(&hidden_layers[i - 1].outputs[k]);
+        __m256d input_vec = _mm256_load_pd(&net->hidden_layers[i - 1].outputs[k]);
         __m256d weight_vec =
-            _mm256_load_pd(&hidden_layers[i].weights[j * HIDDEN_SIZE + k]);
+            _mm256_load_pd(&net->hidden_layers[i].weights[j * HIDDEN_SIZE + k]);
         sum_vec = _mm256_fmadd_pd(input_vec, weight_vec, sum_vec);
       }
 
-      hidden_layers[i].outputs[j] = sigmoid(horizontal_sum(sum_vec));
+      net->hidden_layers[i].outputs[j] = sigmoid(horizontal_sum(sum_vec));
     }
   }
 
   // Output layer
   for (int i = 0; i < OUTPUT_SIZE; i++) {
-    __m256d sum_vec = _mm256_set1_pd(output_biases[i]);
+    __m256d sum_vec = _mm256_set1_pd(net->output_biases[i]);
 
     for (int j = 0; j < HIDDEN_SIZE; j += 4) {
       __m256d input_vec =
-          _mm256_load_pd(&hidden_layers[HIDDEN_LAYERS - 1].outputs[j]);
-      __m256d weight_vec = _mm256_load_pd(&output_weights[i * HIDDEN_SIZE + j]);
+          _mm256_load_pd(&net->hidden_layers[HIDDEN_LAYERS - 1].outputs[j]);
+      __m256d weight_vec =
+          _mm256_load_pd(&net->output_weights[i * HIDDEN_SIZE + j]);
       sum_vec = _mm256_fmadd_pd(input_vec, weight_vec, sum_vec);
     }
 
-    output_layer[i] = sigmoid(horizontal_sum(sum_vec));
+    net->output_layer[i] = sigmoid(horizontal_sum(sum_vec));
   }
 }
 
-double loss() {
+double loss(Network *net) {
   double total_loss = 0.0;
 
   for (int i = 0; i < OUTPUT_SIZE; i += 4) {
-    __m256d target_vec = _mm256_load_pd(&target[i]);
-    __m256d output_vec = _mm256_load_pd(&output_layer[i]);
+    __m256d target_vec = _mm256_load_pd(&net->target[i]);
+    __m256d output_vec = _mm256_load_pd(&net->output_layer[i]);
 
     // Calculate error
     __m256d error_vec = _mm256_sub_pd(target_vec, output_vec);
@@ -183,7 +186,7 @@ double loss() {
 
     // Calculate deltas
     __m256d delta_vec = _mm256_mul_pd(error_vec, deriv_vec);
-    _mm256_store_pd(&output_deltas[i], delta_vec);
+    _mm256_store_pd(&net->output_deltas[i], delta_vec);
 
     // Calculate squared error for loss
     __m256d squared_error = _mm256_mul_pd(error_vec, error_vec);
@@ -193,108 +196,108 @@ double loss() {
   return total_loss / OUTPUT_SIZE_ORIGINAL;
 }
 
-void backward() {
+void backward(Network *net) {
   for (int i = HIDDEN_LAYERS - 1; i >= 0; i--) {
     for (int j = 0; j < HIDDEN_SIZE; j++) {
       __m256d error_vec = _mm256_setzero_pd();
 
       if (i == HIDDEN_LAYERS - 1) {
         for (int k = 0; k < OUTPUT_SIZE; k += 4) {
-          __m256d delta_vec = _mm256_load_pd(&output_deltas[k]);
+          __m256d delta_vec = _mm256_load_pd(&net->output_deltas[k]);
           __m256d weight_vec =
-              _mm256_set_pd(output_weights[(k + 3) * HIDDEN_SIZE + j],
-                            output_weights[(k + 2) * HIDDEN_SIZE + j],
-                            output_weights[(k + 1) * HIDDEN_SIZE + j],
-                            output_weights[k * HIDDEN_SIZE + j]);
+              _mm256_set_pd(net->output_weights[(k + 3) * HIDDEN_SIZE + j],
+                            net->output_weights[(k + 2) * HIDDEN_SIZE + j],
+                            net->output_weights[(k + 1) * HIDDEN_SIZE + j],
+                            net->output_weights[k * HIDDEN_SIZE + j]);
           error_vec = _mm256_fmadd_pd(delta_vec, weight_vec, error_vec);
         }
       } else {
         for (int k = 0; k < HIDDEN_SIZE; k += 4) {
-          __m256d delta_vec = _mm256_load_pd(&hidden_layers[i + 1].deltas[k]);
+          __m256d delta_vec = _mm256_load_pd(&net->hidden_layers[i + 1].deltas[k]);
           __m256d weight_vec = _mm256_set_pd(
-              hidden_layers[i + 1].weights[(k + 3) * HIDDEN_SIZE + j],
-              hidden_layers[i + 1].weights[(k + 2) * HIDDEN_SIZE + j],
-              hidden_layers[i + 1].weights[(k + 1) * HIDDEN_SIZE + j],
-              hidden_layers[i + 1].weights[k * HIDDEN_SIZE + j]);
+              net->hidden_layers[i + 1].weights[(k + 3) * HIDDEN_SIZE + j],
+              net->hidden_layers[i + 1].weights[(k + 2) * HIDDEN_SIZE + j],
+              net->hidden_layers[i + 1].weights[(k + 1) * HIDDEN_SIZE + j],
+              net->hidden_layers[i + 1].weights[k * HIDDEN_SIZE + j]);
           error_vec = _mm256_fmadd_pd(delta_vec, weight_vec, error_vec);
         }
       }
       double error = horizontal_sum(error_vec);
-      hidden_layers[i].deltas[j] =
-          error * sigmoid_derivative(hidden_layers[i].outputs[j]);
+      net->hidden_layers[i].deltas[j] =
+          error * sigmoid_derivative(net->hidden_layers[i].outputs[j]);
     }
   }
 
   for (int i = 0; i < OUTPUT_SIZE; i++) {
-    __m256d delta_vec = _mm256_set1_pd(output_deltas[i]);
+    __m256d delta_vec = _mm256_set1_pd(net->output_deltas[i]);
     __m256d lr_vec = _mm256_set1_pd(LEARNING_RATE);
 
     for (int j = 0; j < HIDDEN_SIZE; j += 4) {
       __m256d hidden_output_vec =
-          _mm256_load_pd(&hidden_layers[HIDDEN_LAYERS - 1].outputs[j]);
+          _mm256_load_pd(&net->hidden_layers[HIDDEN_LAYERS - 1].outputs[j]);
       __m256d weight_update =
           _mm256_mul_pd(_mm256_mul_pd(lr_vec, delta_vec), hidden_output_vec);
 
       __m256d current_weights =
-          _mm256_load_pd(&output_weights[i * HIDDEN_SIZE + j]);
+          _mm256_load_pd(&net->output_weights[i * HIDDEN_SIZE + j]);
       __m256d new_weights = _mm256_add_pd(current_weights, weight_update);
-      _mm256_store_pd(&output_weights[i * HIDDEN_SIZE + j], new_weights);
+      _mm256_store_pd(&net->output_weights[i * HIDDEN_SIZE + j], new_weights);
     }
 
-    output_biases[i] += LEARNING_RATE * output_deltas[i];
+    net->output_biases[i] += LEARNING_RATE * net->output_deltas[i];
   }
 
   for (int i = HIDDEN_LAYERS - 1; i >= 0; i--) {
     size_t prev_size = (i > 0) ? HIDDEN_SIZE : INPUT_SIZE;
 
     for (int j = 0; j < HIDDEN_SIZE; j++) {
-      __m256d delta_vec = _mm256_set1_pd(hidden_layers[i].deltas[j]);
+      __m256d delta_vec = _mm256_set1_pd(net->hidden_layers[i].deltas[j]);
       __m256d lr_vec = _mm256_set1_pd(LEARNING_RATE);
 
       for (unsigned k = 0; k < prev_size; k += 4) {
         __m256d prev_output_vec;
         if (i > 0) {
-          prev_output_vec = _mm256_load_pd(&hidden_layers[i - 1].outputs[k]);
+          prev_output_vec = _mm256_load_pd(&net->hidden_layers[i - 1].outputs[k]);
         } else {
-          prev_output_vec = _mm256_load_pd(&input[k]);
+          prev_output_vec = _mm256_load_pd(&net->input[k]);
         }
 
         __m256d weight_update =
             _mm256_mul_pd(_mm256_mul_pd(lr_vec, delta_vec), prev_output_vec);
 
         __m256d current_weights =
-            _mm256_load_pd(&hidden_layers[i].weights[j * prev_size + k]);
+            _mm256_load_pd(&net->hidden_layers[i].weights[j * prev_size + k]);
         __m256d new_weights = _mm256_add_pd(current_weights, weight_update);
-        _mm256_store_pd(&hidden_layers[i].weights[j * prev_size + k],
+        _mm256_store_pd(&net->hidden_layers[i].weights[j * prev_size + k],
                         new_weights);
       }
 
-      hidden_layers[i].biases[j] += LEARNING_RATE * hidden_layers[i].deltas[j];
+      net->hidden_layers[i].biases[j] += LEARNING_RATE * net->hidden_layers[i].deltas[j];
     }
   }
 }
 
-void cleanup() {
+void cleanup(Network *net) {
   for (int i = 0; i < HIDDEN_LAYERS; i++) {
-    free(hidden_layers[i].weights);
-    free(hidden_layers[i].outputs);
-    free(hidden_layers[i].biases);
-    free(hidden_layers[i].deltas);
+    free(net->hidden_layers[i].weights);
+    free(net->hidden_layers[i].outputs);
+    free(net->hidden_layers[i].biases);
+    free(net->hidden_layers[i].deltas);
   }
 
-  free(hidden_layers);
-  free(input);
-  free(output_weights);
-  free(output_biases);
-  free(output_layer);
-  free(output_deltas);
-  free(target);
+  free(net->hidden_layers);
+  free(net->input);
+  free(net->output_weights);
+  free(net->output_biases);
+  free(net->output_layer);
+  free(net->output_deltas);
+  free(net->target);
   // real_target was allocated using OUTPUT_SIZE to include padding
   // so free it here accordingly
-  free(real_target);
+  free(net->real_target);
 }
 
-int save_model(const char *filename) {
+int save_model(Network *net, const char *filename) {
   FILE *file = fopen(filename, "wb");
   if (!file) {
     fprintf(stderr, "Error: Could not open file %s for writing\n", filename);
@@ -305,14 +308,14 @@ int save_model(const char *filename) {
     size_t input_dim = (i == 0) ? INPUT_SIZE : HIDDEN_SIZE;
     size_t weight_size = HIDDEN_SIZE * input_dim;
 
-    if (fwrite(hidden_layers[i].weights, sizeof(double), weight_size, file) !=
+    if (fwrite(net->hidden_layers[i].weights, sizeof(double), weight_size, file) !=
         weight_size) {
       fprintf(stderr, "Error writing hidden layer %d weights\n", i);
       fclose(file);
       return 0;
     }
 
-    if (fwrite(hidden_layers[i].biases, sizeof(double), HIDDEN_SIZE, file) !=
+    if (fwrite(net->hidden_layers[i].biases, sizeof(double), HIDDEN_SIZE, file) !=
         HIDDEN_SIZE) {
       fprintf(stderr, "Error writing hidden layer %d biases\n", i);
       fclose(file);
@@ -320,14 +323,14 @@ int save_model(const char *filename) {
     }
   }
 
-  if (fwrite(output_weights, sizeof(double), OUTPUT_SIZE * HIDDEN_SIZE, file) !=
+  if (fwrite(net->output_weights, sizeof(double), OUTPUT_SIZE * HIDDEN_SIZE, file) !=
       OUTPUT_SIZE * HIDDEN_SIZE) {
     fprintf(stderr, "Error writing output weights\n");
     fclose(file);
     return 0;
   }
 
-  if (fwrite(output_biases, sizeof(double), OUTPUT_SIZE, file) != OUTPUT_SIZE) {
+  if (fwrite(net->output_biases, sizeof(double), OUTPUT_SIZE, file) != OUTPUT_SIZE) {
     fprintf(stderr, "Error writing output biases\n");
     fclose(file);
     return 0;
@@ -338,7 +341,7 @@ int save_model(const char *filename) {
   return 1;
 }
 
-int load_model(const char *filename) {
+int load_model(Network *net, const char *filename) {
   FILE *file = fopen(filename, "rb");
   if (!file) {
     fprintf(stderr, "Error: Could not open model file %s\n", filename);
@@ -349,13 +352,13 @@ int load_model(const char *filename) {
     size_t input_dim = (i == 0) ? INPUT_SIZE : HIDDEN_SIZE;
     size_t weight_size = HIDDEN_SIZE * input_dim;
 
-    if (fread(hidden_layers[i].weights, sizeof(double), weight_size, file) !=
+    if (fread(net->hidden_layers[i].weights, sizeof(double), weight_size, file) !=
         weight_size) {
       fprintf(stderr, "Error reading hidden layer %d weights\n", i);
       fclose(file);
       return 0;
     }
-    if (fread(hidden_layers[i].biases, sizeof(double), HIDDEN_SIZE, file) !=
+    if (fread(net->hidden_layers[i].biases, sizeof(double), HIDDEN_SIZE, file) !=
         HIDDEN_SIZE) {
       fprintf(stderr, "Error reading hidden layer %d biases\n", i);
       fclose(file);
@@ -363,14 +366,14 @@ int load_model(const char *filename) {
     }
   }
 
-  if (fread(output_weights, sizeof(double), OUTPUT_SIZE * HIDDEN_SIZE, file) !=
+  if (fread(net->output_weights, sizeof(double), OUTPUT_SIZE * HIDDEN_SIZE, file) !=
       OUTPUT_SIZE * HIDDEN_SIZE) {
     fprintf(stderr, "Error reading output weights\n");
     fclose(file);
     return 0;
   }
 
-  if (fread(output_biases, sizeof(double), OUTPUT_SIZE, file) != OUTPUT_SIZE) {
+  if (fread(net->output_biases, sizeof(double), OUTPUT_SIZE, file) != OUTPUT_SIZE) {
     fprintf(stderr, "Error reading output biases\n");
     fclose(file);
     return 0;
@@ -380,26 +383,26 @@ int load_model(const char *filename) {
   return 1;
 }
 
-void load_data() {
+void load_data(Network *net) {
   for (unsigned i = 0; i < INPUT_SIZE_ORIGINAL; i++) {
-    input[i] = rand() / (double)RAND_MAX;
+    net->input[i] = rand() / (double)RAND_MAX;
   }
   // Pad remaining input elements with zeros
   for (unsigned i = INPUT_SIZE_ORIGINAL; i < INPUT_SIZE; i++) {
-    input[i] = 0.0;
+    net->input[i] = 0.0;
   }
 
   for (unsigned i = 0; i < OUTPUT_SIZE_ORIGINAL; i++) {
-    real_target[i] = rand() / (double)RAND_MAX;
-    target[i] = real_target[i];
+    net->real_target[i] = rand() / (double)RAND_MAX;
+    net->target[i] = net->real_target[i];
   }
   // Pad remaining target elements with zeros
   for (unsigned i = OUTPUT_SIZE_ORIGINAL; i < OUTPUT_SIZE; i++) {
-    target[i] = 0.0;
+    net->target[i] = 0.0;
   }
 }
 
-void train() {
+void train(Network *net) {
   int epoch = 0;
   double _loss = 100.0;
   puts("┏━━━━━━━━━━━━━━━━━━━━━━┓");
@@ -409,9 +412,9 @@ void train() {
   clock_t start = clock();
   while (_loss > MAX_ACCEPTABLE_LOSS && epoch < MAX_EPOCHS) {
     epoch += 1;
-    forward();
-    _loss = loss();
-    backward();
+    forward(net);
+    _loss = loss(net);
+    backward(net);
 
     if (epoch % REPORT_FREQUENCY == 0 || epoch == 1) {
       printf("┃ %7d  %.9f ┃\n", epoch, _loss);
@@ -465,12 +468,13 @@ void train() {
 int main() {
   srand(RANDOM_SEED);
 
-  initialize_network();
-  load_data();
+  Network net;
+  initialize_network(&net);
+  load_data(&net);
 
-  train();
-  save_model("model.bin");
+  train(&net);
+  save_model(&net, "model.bin");
 
-  cleanup();
+  cleanup(&net);
   return 0;
 }
