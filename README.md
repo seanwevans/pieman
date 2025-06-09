@@ -1,7 +1,7 @@
 # Pieman
 
-Pieman is a simple neural network with a configurable number of hidden layers, 
-optimized using AVX vectorization for performance. 
+Pieman is a simple neural network with a configurable number of hidden layers,
+optimized using AVX vectorization for performance.
 
 ## Features
 
@@ -44,6 +44,13 @@ The training will start and display epoch-wise loss values. The trained model is
 - **Loss Function**: Mean Squared Error (MSE)
 - **Optimizer**: Gradient Descent
 
+All layers allocate memory using 32‑byte alignment so that 256‑bit AVX
+instructions can operate on four `double` values at a time. The code pads each
+layer's size to a multiple of four and performs matrix multiplications using
+`_mm256_load_pd` and `_mm256_fmadd_pd` for efficient fused multiply‑add
+operations. A helper `horizontal_sum` function reduces the AVX registers to a
+scalar result, enabling the forward and backward passes to remain vectorized.
+
 ## Example Output
 
 ```
@@ -63,6 +70,11 @@ The training will start and display epoch-wise loss values. The trained model is
 🏋️ Training Time: 1.16 seconds
 💾 Model saved: model.bin
 ```
+
+The snippet above was captured after building the project with `make` and
+running `./nnet`. Training stops once the loss drops below the threshold defined
+by `MAX_ACCEPTABLE_LOSS`, which with the default settings happens at roughly
+61k epochs.
 
 ## Saving and Loading the Model
 
@@ -93,6 +105,9 @@ if (rc < 0) {
 // If loading succeeds no message is printed by the function.
 ```
 
+Call this after `initialize_network()` to restore the weights and biases before
+training or inference.
+
 ## Customization
 
 Modify these macros in `main.c` to adjust the model:
@@ -107,6 +122,20 @@ Modify these macros in `main.c` to adjust the model:
 #define MAX_ACCEPTABLE_LOSS 1e-5
 #define REPORT_FREQUENCY 10000
 ```
+
+## Optional: BetaNet Example
+
+The repository also includes `beta.py`, a small PyTorch script that
+demonstrates a modern framework for neural networks. To try it out, install the
+Python dependencies and run the script:
+
+```sh
+pip install numpy torch matplotlib scipy
+python3 beta.py
+```
+
+This step is completely optional and may require a machine with sufficient
+memory and AVX2 support.
 
 ## Cleanup
 
