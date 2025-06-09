@@ -1,7 +1,7 @@
 # Pieman
 
-Pieman is a simple neural network with a configurable number of hidden layers, 
-optimized using AVX vectorization for performance. 
+Pieman is a simple neural network with a configurable number of hidden layers,
+optimized using AVX vectorization for performance.
 
 ## Features
 
@@ -16,6 +16,12 @@ optimized using AVX vectorization for performance.
 - **Compiler**: GCC with AVX support (`-mavx -mavx2`)
 - **Libraries**: Standard C libraries (`stdio.h`, `stdlib.h`, `math.h`, `immintrin.h`)
 - **OS**: Linux/macOS/Windows (with proper AVX support)
+
+For the optional `beta.py` demo, install the Python dependencies:
+
+```sh
+pip install -r requirements.txt
+```
 
 ## Compilation
 
@@ -35,6 +41,17 @@ Run the executable:
 
 The training will start and display epoch-wise loss values. The trained model is saved as `model.bin`.
 
+## Command-line Options
+
+You can override default parameters at runtime:
+
+| Option | Description | Default |
+| ------ | ----------- | ------- |
+| `-l`   | Number of hidden layers | `28` |
+| `-s`   | Neurons per hidden layer | `28` |
+| `-r`   | Learning rate | `1e-2` |
+| `-e`   | Maximum epochs | `1e9` |
+
 ## Model Architecture
 
 - **Input Layer**: 784 neurons (default)
@@ -43,6 +60,13 @@ The training will start and display epoch-wise loss values. The trained model is
 - **Activation Function**: Sigmoid
 - **Loss Function**: Mean Squared Error (MSE)
 - **Optimizer**: Gradient Descent
+
+All layers allocate memory using 32‑byte alignment so that 256‑bit AVX
+instructions can operate on four `double` values at a time. The code pads each
+layer's size to a multiple of four and performs matrix multiplications using
+`_mm256_load_pd` and `_mm256_fmadd_pd` for efficient fused multiply‑add
+operations. A helper `horizontal_sum` function reduces the AVX registers to a
+scalar result, enabling the forward and backward passes to remain vectorized.
 
 ## Example Output
 
@@ -64,38 +88,71 @@ The training will start and display epoch-wise loss values. The trained model is
 💾 Model saved: model.bin
 ```
 
+The snippet above was captured after building the project with `make` and
+running `./nnet`. Training stops once the loss drops below the threshold defined
+by `MAX_ACCEPTABLE_LOSS`, which with the default settings happens at roughly
+61k epochs.
+
 ## Saving and Loading the Model
 
 ### Save Model
 
-The model is saved automatically after training:
+The model is saved automatically after training. Check the return value to
+ensure the operation succeeded:
 
 ```c
-save_model("model.bin");
+int rc = save_model("model.bin");
+if (rc < 0) {
+    fprintf(stderr, "Failed to save model (error %d)\n", rc);
+}
+// On success you'll see:
+// 💾 model.bin
+// On failure an error message is printed and rc will be negative.
 ```
 
 ### Load Model
 
-To load a saved model:
+To load a saved model and verify it loads correctly:
 
 ```c
-load_model("model.bin");
+rc = load_model("model.bin");
+if (rc < 0) {
+    fprintf(stderr, "Failed to load model (error %d)\n", rc);
+}
+// If loading succeeds no message is printed by the function.
 ```
+
+Call this after `initialize_network()` to restore the weights and biases before
+training or inference.
 
 ## Customization
 
-Modify these macros in `main.c` to adjust the model:
+Modify these macros in `main.c` to adjust the default model:
 
 ```c
 #define INPUT_SIZE_ORIGINAL 784
-#define HIDDEN_LAYERS 28
-#define HIDDEN_SIZE_ORIGINAL 28
+#define DEFAULT_HIDDEN_LAYERS 28
+#define DEFAULT_HIDDEN_SIZE_ORIGINAL 28
 #define OUTPUT_SIZE_ORIGINAL 10
-#define LEARNING_RATE 1e-2
-#define MAX_EPOCHS 1e9
+#define DEFAULT_LEARNING_RATE 1e-2
+#define DEFAULT_MAX_EPOCHS 1e9
 #define MAX_ACCEPTABLE_LOSS 1e-5
 #define REPORT_FREQUENCY 10000
 ```
+
+## Optional: BetaNet Example
+
+The repository also includes `beta.py`, a small PyTorch script that
+demonstrates a modern framework for neural networks. To try it out, install the
+Python dependencies and run the script:
+
+```sh
+pip install numpy torch matplotlib scipy
+python3 beta.py
+```
+
+This step is completely optional and may require a machine with sufficient
+memory and AVX2 support.
 
 ## Cleanup
 
@@ -105,6 +162,20 @@ Remove compiled binaries:
 make clean
 ```
 
+## Testing
+
+Run the minimal test suite with:
+
+```sh
+make test
+```
+
 ## License
 
 This project is licensed under the MIT license.
+
+## `beta.py`
+
+`beta.py` is a small PyTorch example that learns the parameters of a Beta
+distribution from randomly generated inputs. It demonstrates how to build a
+simple neural network using `numpy`, `torch`, `scipy`, and `matplotlib`.
