@@ -23,6 +23,12 @@
 
 #define REPORT_FREQUENCY 10000
 
+enum {
+  MODEL_SUCCESS = 1,
+  MODEL_ERR_OPEN = -1,
+  MODEL_ERR_IO = -2
+};
+
 typedef struct {
   double *weights;
   double *outputs;
@@ -298,7 +304,7 @@ int save_model(const char *filename) {
   FILE *file = fopen(filename, "wb");
   if (!file) {
     fprintf(stderr, "Error: Could not open file %s for writing\n", filename);
-    return 0;
+    return MODEL_ERR_OPEN;
   }
 
   for (int i = 0; i < HIDDEN_LAYERS; i++) {
@@ -309,14 +315,14 @@ int save_model(const char *filename) {
         weight_size) {
       fprintf(stderr, "Error writing hidden layer %d weights\n", i);
       fclose(file);
-      return 0;
+      return MODEL_ERR_IO;
     }
 
     if (fwrite(hidden_layers[i].biases, sizeof(double), HIDDEN_SIZE, file) !=
         HIDDEN_SIZE) {
       fprintf(stderr, "Error writing hidden layer %d biases\n", i);
       fclose(file);
-      return 0;
+      return MODEL_ERR_IO;
     }
   }
 
@@ -324,25 +330,25 @@ int save_model(const char *filename) {
       OUTPUT_SIZE * HIDDEN_SIZE) {
     fprintf(stderr, "Error writing output weights\n");
     fclose(file);
-    return 0;
+    return MODEL_ERR_IO;
   }
 
   if (fwrite(output_biases, sizeof(double), OUTPUT_SIZE, file) != OUTPUT_SIZE) {
     fprintf(stderr, "Error writing output biases\n");
     fclose(file);
-    return 0;
+    return MODEL_ERR_IO;
   }
 
   fclose(file);
   printf("💾 %s\n", filename);
-  return 1;
+  return MODEL_SUCCESS;
 }
 
 int load_model(const char *filename) {
   FILE *file = fopen(filename, "rb");
   if (!file) {
     fprintf(stderr, "Error: Could not open model file %s\n", filename);
-    return 0;
+    return MODEL_ERR_OPEN;
   }
 
   for (int i = 0; i < HIDDEN_LAYERS; i++) {
@@ -353,13 +359,13 @@ int load_model(const char *filename) {
         weight_size) {
       fprintf(stderr, "Error reading hidden layer %d weights\n", i);
       fclose(file);
-      return 0;
+      return MODEL_ERR_IO;
     }
     if (fread(hidden_layers[i].biases, sizeof(double), HIDDEN_SIZE, file) !=
         HIDDEN_SIZE) {
       fprintf(stderr, "Error reading hidden layer %d biases\n", i);
       fclose(file);
-      return 0;
+      return MODEL_ERR_IO;
     }
   }
 
@@ -367,17 +373,17 @@ int load_model(const char *filename) {
       OUTPUT_SIZE * HIDDEN_SIZE) {
     fprintf(stderr, "Error reading output weights\n");
     fclose(file);
-    return 0;
+    return MODEL_ERR_IO;
   }
 
   if (fread(output_biases, sizeof(double), OUTPUT_SIZE, file) != OUTPUT_SIZE) {
     fprintf(stderr, "Error reading output biases\n");
     fclose(file);
-    return 0;
+    return MODEL_ERR_IO;
   }
 
   fclose(file);
-  return 1;
+  return MODEL_SUCCESS;
 }
 
 void load_data() {
@@ -469,7 +475,15 @@ int main() {
   load_data();
 
   train();
-  save_model("model.bin");
+  int rc = save_model("model.bin");
+  if (rc < 0) {
+    fprintf(stderr, "Failed to save model (error %d)\n", rc);
+  }
+
+  rc = load_model("model.bin");
+  if (rc < 0) {
+    fprintf(stderr, "Failed to load model (error %d)\n", rc);
+  }
 
   cleanup();
   return 0;
