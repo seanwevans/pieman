@@ -17,6 +17,12 @@ optimized using AVX vectorization for performance.
 - **Libraries**: Standard C libraries (`stdio.h`, `stdlib.h`, `math.h`, `immintrin.h`)
 - **OS**: Linux/macOS/Windows (with proper AVX support)
 
+For the optional `beta.py` demo, install the Python dependencies:
+
+```sh
+pip install -r requirements.txt
+```
+
 ## Compilation
 
 Use the provided `Makefile` to build the project:
@@ -148,3 +154,9 @@ make clean
 ## License
 
 This project is licensed under the MIT license.
+
+## `beta.py`
+
+`beta.py` is a small PyTorch example that learns the parameters of a Beta
+distribution from randomly generated inputs. It demonstrates how to build a
+simple neural network using `numpy`, `torch`, `scipy`, and `matplotlib`.
