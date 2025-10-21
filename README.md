@@ -1,4 +1,6 @@
 # Pieman
+<img width="256" alt="A pieman" src="https://github.com/user-attachments/assets/69ddd1fd-1329-4820-96f8-677d478a07c5" />
+
 
 Pieman is a simple neural network with a configurable number of hidden layers,
 optimized using AVX vectorization for performance.
